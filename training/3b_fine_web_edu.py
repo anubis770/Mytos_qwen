@@ -37,7 +37,7 @@ from open_mythos.tokenizer import MythosTokenizer
 # --- Hybrid loading ----------------------------------------------------------
 # Set BASE_MODEL to a HuggingFace model ID to load pretrained weights into
 # Prelude / Coda / Embed.  Set None for random init (original behaviour).
-BASE_MODEL: str | None = "sulpikar2/Qwen3.6-27B-heretic"
+BASE_MODEL: str | None = "sulpikar2/Qwen3.6-27B-hereticv3"
 FREEZE_PRELUDE = True
 FREEZE_CODA = True
 FREEZE_EMBED = True

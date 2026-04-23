@@ -11,7 +11,7 @@ Usage
     from open_mythos.hybrid_loader import load_hf_weights, freeze_pretrained_layers
 
     model = OpenMythos(cfg)
-    load_hf_weights(model, "sulpikar2/Qwen3.6-27B-heretic")
+    load_hf_weights(model, "sulpikar2/Qwen3.6-27B-hereticv3")
     freeze_pretrained_layers(model)
 
 Design

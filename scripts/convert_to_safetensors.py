@@ -116,7 +116,7 @@ def convert_checkpoint(
     # Model card README
     readme = f"""---
 license: apache-2.0
-base_model: sulpikar2/Qwen3.6-27B-heretic
+base_model: sulpikar2/Qwen3.6-27B-hereticv3
 library_name: transformers
 tags:
   - open_mythos
@@ -128,7 +128,7 @@ tags:
 # OpenMythos Hybrid (step {step:,})
 
 This is a hybrid model combining **pre-trained weights** from
-``sulpikar2/Qwen3.6-27B-heretic`` with a novel **Recurrent-Depth Transformer**
+``sulpikar2/Qwen3.6-27B-hereticv3`` with a novel **Recurrent-Depth Transformer**
 RecurrentBlock trained from scratch.
 
 ## Architecture
