@@ -34,6 +34,15 @@ from open_mythos.main import TransformerBlock, RecurrentBlock
 from open_mythos.variants import mythos_3b
 from open_mythos.tokenizer import MythosTokenizer
 
+# --- Hybrid loading ----------------------------------------------------------
+# Set BASE_MODEL to a HuggingFace model ID to load pretrained weights into
+# Prelude / Coda / Embed.  Set None for random init (original behaviour).
+BASE_MODEL: str | None = "sulpikar2/Qwen3.6-27B-heretic"
+FREEZE_PRELUDE = True
+FREEZE_CODA = True
+FREEZE_EMBED = True
+FREEZE_HEAD = False
+
 
 # ---------------------------------------------------------------------------
 # Dataset
@@ -362,11 +371,12 @@ def main():
     # ------------------------------------------------------------------
     # Tokenizer
     # ------------------------------------------------------------------
-    encoding = MythosTokenizer()
+    tokenizer_id = BASE_MODEL if BASE_MODEL else "openai/gpt-oss-20b"
+    encoding = MythosTokenizer(model_id=tokenizer_id)
     vocab_size = encoding.vocab_size
 
     if master:
-        logger.info(f"Tokenizer: gpt-oss-20b  |  Vocab size: {vocab_size:,}")
+        logger.info(f"Tokenizer: {tokenizer_id}  |  Vocab size: {vocab_size:,}")
 
     # ------------------------------------------------------------------
     # Hyperparameters
@@ -394,14 +404,35 @@ def main():
     # ------------------------------------------------------------------
     # Model
     # ------------------------------------------------------------------
-    cfg = mythos_3b()
-    cfg.vocab_size = vocab_size
-    cfg.max_seq_len = seq_len
+    if BASE_MODEL:
+        # Derive config from the HF model so dimensions match exactly
+        from transformers import AutoConfig
+        hf_cfg = AutoConfig.from_pretrained(BASE_MODEL)
+        cfg = from_hf_config(hf_cfg)
+        cfg.vocab_size = vocab_size
+        cfg.max_seq_len = seq_len
+        if master:
+            logger.info(f"HF base model: {BASE_MODEL}")
+            logger.info(f"OpenMythos config auto-derived: dim={cfg.dim}, layers={cfg.prelude_layers}+{cfg.max_loop_iters}+{cfg.coda_layers}, heads={cfg.n_heads}/{cfg.n_kv_heads}")
+    else:
+        cfg = mythos_3b()
+        cfg.vocab_size = vocab_size
+        cfg.max_seq_len = seq_len
 
     bf16_ok = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     amp_dtype = torch.bfloat16 if bf16_ok else torch.float16
 
     model = OpenMythos(cfg)
+
+    if BASE_MODEL:
+        load_hf_weights(model, BASE_MODEL, dtype=amp_dtype)
+        freeze_pretrained_layers(
+            model,
+            freeze_embed=FREEZE_EMBED,
+            freeze_prelude=FREEZE_PRELUDE,
+            freeze_coda=FREEZE_CODA,
+            freeze_head=FREEZE_HEAD,
+        )
 
     if ddp:
         mp_policy = MixedPrecision(

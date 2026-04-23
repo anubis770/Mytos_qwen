@@ -17,6 +17,7 @@ from open_mythos.main import (
 )
 from open_mythos.tokenizer import MythosTokenizer
 from open_mythos.variants import (
+    from_hf_config,
     mythos_1b,
     mythos_1t,
     mythos_3b,
@@ -42,6 +43,7 @@ __all__ = [
     "precompute_rope_freqs",
     "apply_rope",
     "loop_index_embedding",
+    "from_hf_config",
     "mythos_1b",
     "mythos_3b",
     "mythos_10b",

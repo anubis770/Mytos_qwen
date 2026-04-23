@@ -6,6 +6,70 @@ from open_mythos.main import MythosConfig
 # expert_dim is solved from the residual budget after all other terms.
 
 
+def from_hf_config(hf_cfg) -> MythosConfig:
+    """Build a MythosConfig that dimensionally matches a HF model config.
+
+    Works with Llama/Qwen/Mistral style configs.  Forces ``attn_type='gqa'``
+    because standard HF models do not implement MLA.
+
+    Args:
+        hf_cfg: a ``transformers.PretrainedConfig`` instance or a plain dict.
+
+    Returns:
+        ``MythosConfig`` with compatible dimensions.
+    """
+    # Qwen3.5 nests text config inside a vision wrapper
+    if hasattr(hf_cfg, "text_config"):
+        c = hf_cfg.text_config
+    else:
+        c = hf_cfg
+
+    hidden_size = getattr(c, "hidden_size", 2048)
+    num_layers = getattr(c, "num_hidden_layers", 24)
+    n_heads = getattr(c, "num_attention_heads", 16)
+    n_kv_heads = getattr(c, "num_key_value_heads", n_heads)
+    vocab_size = getattr(c, "vocab_size", 32000)
+    max_seq_len = getattr(c, "max_position_embeddings", 4096)
+    intermediate_size = getattr(c, "intermediate_size", hidden_size * 4 // 3)
+    rope_theta = getattr(c, "rope_theta", 500000.0)
+
+    # Split layers roughly: 1/4 prelude, 1/2 recurrent loop budget, 1/4 coda
+    prelude = max(2, num_layers // 4)
+    coda = max(2, num_layers // 4)
+    loop_iters = max(4, num_layers - prelude - coda)
+
+    # MoE defaults scaled to model size
+    n_experts = 64 if hidden_size <= 4096 else 128 if hidden_size <= 8192 else 256
+    n_shared = 2 if n_experts <= 64 else 4
+    topk = 4 if n_experts <= 64 else 8
+
+    return MythosConfig(
+        vocab_size=vocab_size,
+        dim=hidden_size,
+        n_heads=n_heads,
+        n_kv_heads=n_kv_heads,
+        max_seq_len=max_seq_len,
+        max_loop_iters=loop_iters,
+        prelude_layers=prelude,
+        coda_layers=coda,
+        attn_type="gqa",
+        # MLA params ignored because attn_type='gqa'
+        kv_lora_rank=0,
+        q_lora_rank=0,
+        qk_rope_head_dim=0,
+        qk_nope_head_dim=0,
+        v_head_dim=0,
+        n_experts=n_experts,
+        n_shared_experts=n_shared,
+        n_experts_per_tok=topk,
+        expert_dim=intermediate_size // topk,
+        act_threshold=0.99,
+        rope_theta=rope_theta,
+        lora_rank=16 if hidden_size <= 4096 else 32,
+        max_output_tokens=min(max_seq_len, 131072),
+    )
+
+
 def mythos_1b() -> MythosConfig:
     """1B parameter config. Small research/fine-tuning model. dim=2048, 64 experts, 16 loop iters, 4k context."""
     return MythosConfig(
