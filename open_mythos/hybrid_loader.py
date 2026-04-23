@@ -26,11 +26,9 @@ def load_hf_weights(model, hf_model_id: str, dtype: Optional[torch.dtype] = None
         raise ValueError("Hybrid loading requires attn_type='gqa'.")
 
     device = next(model.parameters()).device
-    if device.type != "cuda":
-        raise RuntimeError("Model must be on CUDA. Call model.to('cuda') first.")
-
     dev_str = str(device)
     print(f"[Hybrid] Loading HF weights ZERO-CPU to {dev_str}: {hf_model_id}")
+    print(f"[Hybrid] Model param dtype: {next(model.parameters()).dtype}")
 
     # --- download index ---
     index_path = hf_hub_download(hf_model_id, filename="model.safetensors.index.json")

@@ -9,6 +9,7 @@ Multi-GPU:
     torchrun --nproc_per_node=$(python -c "import torch; print(torch.cuda.device_count())") training/3b_fine_web_edu.py
 """
 
+import gc
 import os
 import math
 import time
@@ -423,7 +424,18 @@ def main():
     bf16_ok = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     amp_dtype = torch.bfloat16 if bf16_ok else torch.float16
 
-    model = OpenMythos(cfg)
+    # Create model directly on GPU in bf16 to avoid CPU OOM.
+    # A ~19B param model in fp32 would need ~76GB CPU RAM; bf16 on GPU is ~38GB.
+    gc.collect()  # free tokenizer/config CPU overhead before allocation
+    if not ddp:
+        _prev_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(amp_dtype)
+        with torch.device(device):
+            model = OpenMythos(cfg)
+        torch.set_default_dtype(_prev_dtype)
+    else:
+        # FSDP path: create on CPU, FSDP handles sharding + device placement
+        model = OpenMythos(cfg)
 
     if BASE_MODEL:
         load_hf_weights(model, BASE_MODEL, dtype=amp_dtype)
@@ -434,6 +446,8 @@ def main():
             freeze_coda=FREEZE_CODA,
             freeze_head=FREEZE_HEAD,
         )
+    gc.collect()
+    torch.cuda.empty_cache()
 
     if ddp:
         mp_policy = MixedPrecision(
@@ -450,7 +464,7 @@ def main():
             device_id=local_rank,
         )
     else:
-        model = model.to(device)
+        # model already on device from creation above
         amp_ctx = (
             torch.amp.autocast(device_type="cuda", dtype=amp_dtype)
             if "cuda" in device
