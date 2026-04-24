@@ -91,7 +91,7 @@ def load_hf_weights(model, hf_model_id: str, dtype: Optional[torch.dtype] = None
         p = f"model.layers.{i}."
         block = model.prelude[i]
         for x in ["q", "k", "v", "o"]:
-            block.attn.__dict__[f"w{x}"].weight.data.copy_(combined[f"{p}self_attn.{x}_proj.weight"])
+            getattr(block.attn, f"w{x}").weight.data.copy_(combined[f"{p}self_attn.{x}_proj.weight"])
         block.ffn.gate.weight.data.copy_(combined[f"{p}mlp.gate_proj.weight"])
         block.ffn.up.weight.data.copy_(combined[f"{p}mlp.up_proj.weight"])
         block.ffn.down.weight.data.copy_(combined[f"{p}mlp.down_proj.weight"])
