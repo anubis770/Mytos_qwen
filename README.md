@@ -135,29 +135,84 @@ print(f"Parameters: {total:,}")
 
 ## Training
 
-The training script for the 3B model on FineWeb-Edu is at [`training/3b_fine_web_edu.py`](training/3b_fine_web_edu.py).
+The training script for fine-tuning on FineWeb-Edu is at [`training/3b_fine_web_edu.py`](training/3b_fine_web_edu.py).
 
-**Single GPU:**
+### Hybrid Loading: Pretrained Weights + New RecurrentBlock
+
+OpenMythos uses a **hybrid loading** approach that combines pretrained weights from a HuggingFace base model (e.g., Qwen2.5-7B) with a randomly initialized RecurrentBlock:
+
+- **Prelude, Coda, Embed, Head** — loaded from the pretrained HuggingFace model and **frozen** during training
+- **RecurrentBlock** — randomly initialized and **trained from scratch** on FineWeb-Edu data
+
+This means the pretrained language processing (from Qwen2.5) is preserved while the core reasoning component (RecurrentBlock) learns from scratch. The frozen layers act as a "feature extractor" for input encoding and output decoding, while the RecurrentBlock develops deep reasoning capabilities through its iterative loop structure.
+
+| Component | Source | Trainable? | Purpose |
+|---|---|---|---|
+| Prelude (7 layers) | Qwen2.5-7B pretrained | No (frozen) | Encode input text |
+| RecurrentBlock (14 loops) | Random init | **Yes** | Deep reasoning via iterative processing |
+| Coda (7 layers) | Qwen2.5-7B pretrained | No (frozen) | Decode output tokens |
+| Embed + Head | Qwen2.5-7B pretrained | No (frozen) | Token embedding & classification |
+
+The hybrid loader (`open_mythos/hybrid_loader.py`) loads weights directly from HuggingFace safetensors shards to GPU with zero CPU staging, avoiding CPU OOM issues on large models. It automatically determines which shards are needed and maps only the relevant weights (prelude, coda, embed, head) — the RecurrentBlock remains randomly initialized.
+
+### Configuration
+
+The training script auto-derives the model config from the HuggingFace base model using `from_hf_config()`, which maps:
+
+| HF Config | OpenMythos Config |
+|---|---|
+| `hidden_size` | `dim` |
+| `num_attention_heads` | `n_heads` |
+| `num_key_value_heads` | `n_kv_heads` |
+| `intermediate_size` | `intermediate_size` (dense FFN in prelude/coda) |
+| `num_hidden_layers` | Split into `prelude_layers` + `max_loop_iters` + `coda_layers` |
+| `vocab_size` | `vocab_size` |
+| `max_position_embeddings` | `max_seq_len` |
+
+The `intermediate_size` field ensures the dense FFN (SwiGLU) layers in prelude and coda match the pretrained model's dimensions exactly — critical for correct weight mapping.
+
+### Gradient Checkpointing
+
+The RecurrentBlock loops 14+ times per forward pass, creating massive activation memory. Gradient checkpointing (`cfg.grad_ckpt = True`) is enabled by default during training — it recomputes activations during the backward pass, trading ~30% more compute for ~60-70% less activation memory. This is essential for fitting 7.5B models on consumer GPUs.
+
+### Single GPU
+
 ```bash
 python training/3b_fine_web_edu.py
 ```
 
-**Multi-GPU (auto-detects GPU count):**
+### Multi-GPU (FSDP)
+
 ```bash
 torchrun --nproc_per_node=$(python -c "import torch; print(torch.cuda.device_count())") training/3b_fine_web_edu.py
 ```
 
-Key design choices:
+> **Note:** For multi-GPU training, sufficient CPU RAM is required since FSDP creates the model on CPU before sharding. Use `torch.set_default_dtype(torch.bfloat16)` to reduce CPU memory usage.
+
+### Training Parameters
 
 | Feature | Detail |
 |---|---|
-| Optimizer | AdamW |
-| Dataset | `HuggingFaceFW/fineweb-edu` (`sample-10BT` by default, swap to `sample-100BT` or `default` for full run) |
-| Tokenizer | `openai/gpt-oss-20b` via `MythosTokenizer` |
-| Parallelism | PyTorch DDP via `torchrun`, sharded streaming dataset |
+| Optimizer | AdamW (lr=3e-4, weight_decay=0.1, betas=(0.9, 0.95)) |
+| Dataset | `HuggingFaceFW/fineweb-edu` (`sample-10BT` by default) |
+| Tokenizer | Auto-loaded from base model (e.g., Qwen2.5-7B-Instruct) |
+| Base model | `unsloth/Qwen2.5-7B-Instruct` (configurable via `BASE_MODEL`) |
+| Parallelism | PyTorch DDP/FSDP via `torchrun`, sharded streaming dataset |
 | Precision | bfloat16 on H100/A100, float16 + GradScaler on older GPUs |
 | Schedule | Linear warmup (2000 steps) → cosine decay |
+| Context length | 8192 tokens |
+| Gradient checkpointing | Enabled by default for RecurrentBlock |
 | Target | 30B tokens (~Chinchilla-adjusted for looped architecture) |
+
+### Customizing the Base Model
+
+Set `BASE_MODEL` at the top of the training script to any HuggingFace model ID with a standard transformer architecture (Llama, Qwen, Mistral, etc.):
+
+```python
+BASE_MODEL: str | None = "unsloth/Qwen2.5-7B-Instruct"  # or "meta-llama/Llama-2-7b", etc.
+```
+
+The `from_hf_config()` function auto-derives compatible dimensions. Only GQA-type attention models are currently supported for hybrid loading (MLA requires separate weight mapping).
 
 ---
 
