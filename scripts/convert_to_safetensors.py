@@ -39,6 +39,9 @@ from pathlib import Path
 import torch
 from safetensors.torch import save_file
 
+# Base model used for hybrid loading (Prelude/Coda/Embed/Head weights)
+BASE_MODEL_ID = "unsloth/Qwen2.5-7B-Instruct"
+
 
 def _open_mythos_state_dict_to_flat(state_dict: dict) -> dict[str, torch.Tensor]:
     """Convert nested OpenMythos state dict to flat Safetensors-compatible dict."""
@@ -59,6 +62,7 @@ def _mythos_config_to_json(cfg) -> dict:
     d = dataclasses.asdict(cfg)
     d["model_type"] = "open_mythos"
     d["architectures"] = ["OpenMythosForCausalLM"]
+    d["base_model"] = BASE_MODEL_ID
     return d
 
 
@@ -91,6 +95,7 @@ def convert_checkpoint(
         "step": str(step),
         "vocab_size": str(vocab_size),
         "format": "open_mythos_hybrid",
+        "base_model": BASE_MODEL_ID,
     })
 
     # Config JSON
@@ -107,7 +112,7 @@ def convert_checkpoint(
         "temperature": 0.7,
         "top_p": 0.9,
         "top_k": 50,
-        "max_new_tokens": 2048,
+        "max_new_tokens": cfg.max_output_tokens if hasattr(cfg, "max_output_tokens") else 8192,
     }
     gen_cfg_path = out_dir / "generation_config.json"
     with open(gen_cfg_path, "w", encoding="utf-8") as f:
@@ -116,7 +121,7 @@ def convert_checkpoint(
     # Model card README
     readme = f"""---
 license: apache-2.0
-base_model: sulpikar2/Qwen3.6-27B-hereticv3
+base_model: {BASE_MODEL_ID}
 library_name: transformers
 tags:
   - open_mythos
@@ -128,16 +133,28 @@ tags:
 # OpenMythos Hybrid (step {step:,})
 
 This is a hybrid model combining **pre-trained weights** from
-``sulpikar2/Qwen3.6-27B-hereticv3`` with a novel **Recurrent-Depth Transformer**
-RecurrentBlock trained from scratch.
+``{BASE_MODEL_ID}`` with a novel **Recurrent-Depth Transformer**
+RecurrentBlock trained from scratch on FineWeb-Edu.
 
 ## Architecture
 
 | Component | Source | Status |
 |-----------|--------|--------|
-| Prelude (first {cfg.prelude_layers} layers) | Qwen3.6-27B | Frozen / Pre-trained |
+| Embedding | {BASE_MODEL_ID} | Frozen / Pre-trained |
+| Prelude (first {cfg.prelude_layers} layers) | {BASE_MODEL_ID} | Frozen / Pre-trained |
 | RecurrentBlock (looped T={cfg.max_loop_iters} times) | **OpenMythos** | **Trained from scratch** |
-| Coda (last {cfg.coda_layers} layers) | Qwen3.6-27B | Frozen / Pre-trained |
+| Coda (last {cfg.coda_layers} layers) | {BASE_MODEL_ID} | Frozen / Pre-trained |
+| LM Head | {BASE_MODEL_ID} | Frozen / Pre-trained |
+
+## Key Details
+
+- **Context length**: {cfg.max_seq_len:,} tokens
+- **Max output tokens**: {cfg.max_output_tokens if hasattr(cfg, 'max_output_tokens') else 8192:,}
+- **Attention**: {cfg.attn_type.upper()} ({cfg.n_heads} query heads, {cfg.n_kv_heads} KV heads)
+- **MoE**: {cfg.n_experts} routed experts + {cfg.n_shared_experts} shared, top-{cfg.n_experts_per_tok}
+- **Recurrent loops**: {cfg.max_loop_iters} (with ACT halting)
+- **Gradient checkpointing**: Used during training for VRAM efficiency
+- **Total params**: {sum(p.numel() for p in flat_state.values()):,}
 
 ## Loading
 
@@ -152,6 +169,8 @@ state = load_file("model.safetensors")
 ## Training
 
 Trained with AdamW on FineWeb-Edu using the OpenMythos training pipeline.
+Prelude, Coda, Embed, and Head weights are frozen (from {BASE_MODEL_ID});
+only the RecurrentBlock is trained.
 
 ## Disclaimer
 
