@@ -385,7 +385,7 @@ def main():
     # ------------------------------------------------------------------
     # Hyperparameters
     # ------------------------------------------------------------------
-    seq_len = 2048
+    seq_len = 8192
     micro_batch = 1 if world_size == 1 else 4  # reduce for single-GPU VRAM
     target_tokens = 30_000_000_000
     grad_accum = max(1, 8 // (world_size * micro_batch))  # small accum for fast feedback
@@ -415,6 +415,7 @@ def main():
         cfg = from_hf_config(hf_cfg)
         cfg.vocab_size = vocab_size
         cfg.max_seq_len = seq_len
+        cfg.max_output_tokens = seq_len
         cfg.grad_ckpt = GRAD_CKPT
         if master:
             logger.info(f"HF base model: {BASE_MODEL}")
