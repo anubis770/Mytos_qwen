@@ -175,8 +175,12 @@ def create_hybrid_checkpoint():
         expert_dim=2048,
         lora_rank=32,
         attn_type="gqa",
-        grad_ckpt=True,              # Gradient checkpointing for memory
-        act_threshold=0.95,
+        # MLA fields (required even for GQA)
+        kv_lora_rank=64,
+        q_lora_rank=128,
+        qk_rope_head_dim=64,
+        qk_nope_head_dim=64,
+        v_head_dim=64,
     )
     print(f"  ✓ Config created")
     print(f"    - Hidden dim: {cfg.dim}")
@@ -225,7 +229,7 @@ def create_hybrid_checkpoint():
     print("\n[Step 5] Saving hybrid checkpoint...")
     checkpoint = {
         "model_state_dict": model.state_dict(),
-        "config": cfg.to_dict() if hasattr(cfg, 'to_dict') else cfg.__dict__,
+        "config": cfg.__dict__,
         "model_class": "OpenMythos",
         "base_model": "Bytedance/Ouro-2.6B-Thinking",
     }
@@ -238,8 +242,7 @@ def create_hybrid_checkpoint():
     # 7. Save config separately
     config_path = output_dir / "hybrid_ouro_mythos_3b_config.json"
     with open(config_path, "w") as f:
-        # Convert config to dict if needed
-        config_dict = cfg.__dict__ if hasattr(cfg, '__dict__') else cfg.to_dict()
+        config_dict = cfg.__dict__
         json.dump(config_dict, f, indent=2)
     print(f"  ✓ Config saved: {config_path}")
     
