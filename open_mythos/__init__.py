@@ -51,7 +51,5 @@ __all__ = [
     "mythos_100b",
     "mythos_500b",
     "mythos_1t",
-    "load_tokenizer",
-    "get_vocab_size",
     "MythosTokenizer",
 ]

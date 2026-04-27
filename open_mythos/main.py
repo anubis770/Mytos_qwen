@@ -491,16 +491,17 @@ class MoEFFN(nn.Module):
         topk_scores = scores.gather(-1, topk_idx)
         topk_scores = topk_scores / topk_scores.sum(dim=-1, keepdim=True)  # renorm
 
-        # routed expert dispatch (token-level scatter)
+        # routed expert dispatch (single-pass scatter via bincount + where)
         out = torch.zeros_like(flat)
-        for i in range(self.topk):
-            expert_ids = topk_idx[:, i]
-            token_scores = topk_scores[:, i].unsqueeze(-1)
-            for eid in range(self.n_experts):
-                mask = expert_ids == eid
-                if not mask.any():
-                    continue
-                out[mask] += token_scores[mask] * self.routed_experts[eid](flat[mask])
+        counts = torch.bincount(topk_idx.flatten(), minlength=self.n_experts)
+        for eid in range(self.n_experts):
+            if counts[eid].item() == 0:
+                continue
+            tok_idx, rank_in_k = torch.where(topk_idx == eid)
+            out[tok_idx] += (
+                topk_scores[tok_idx, rank_in_k, None]
+                * self.routed_experts[eid](flat[tok_idx])
+            )
 
         # shared experts always fire for every token
         for shared in self.shared_experts:

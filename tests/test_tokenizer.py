@@ -59,7 +59,7 @@ def test_encode_long_text(tokenizer):
 
 
 def test_custom_model_id():
-    tok = MythosTokenizer(model_id="openai/gpt-oss-20b")
+    tok = MythosTokenizer(model_id="unsloth/Qwen2.5-7B-Instruct")
     print(f"Custom model_id vocab size: {tok.vocab_size:,}")
     assert tok.vocab_size > 0
 

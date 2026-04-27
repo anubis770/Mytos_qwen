@@ -40,9 +40,9 @@ from open_mythos.hybrid_loader import load_hf_weights, freeze_pretrained_layers
 # Set BASE_MODEL to a HuggingFace model ID to load pretrained weights into
 # Prelude / Coda / Embed.  Set None for random init (original behaviour).
 BASE_MODEL: str | None = "unsloth/Qwen2.5-7B-Instruct"
-FREEZE_PRELUDE = True
-FREEZE_CODA = True
-FREEZE_EMBED = True
+FREEZE_PRELUDE = False
+FREEZE_CODA = False
+FREEZE_EMBED = False
 FREEZE_HEAD = False
 # Gradient checkpointing — trades compute for VRAM; essential for recurrent blocks
 GRAD_CKPT = True
@@ -386,13 +386,13 @@ def main():
     # Hyperparameters
     # ------------------------------------------------------------------
     seq_len = 8192
-    micro_batch = 1 if world_size == 1 else 4  # reduce for single-GPU VRAM
-    target_tokens = 30_000_000_000
-    grad_accum = max(1, 8 // (world_size * micro_batch))  # small accum for fast feedback
+    micro_batch = 1 if world_size == 1 else 4  # increase if VRAM allows
+    target_tokens = 5_000_000_000  # 5B tokens ~ 1-2 hari (ganti ke 30B untuk full run)
+    grad_accum = max(1, 8 // (world_size * micro_batch))
     global_batch_tok = world_size * micro_batch * grad_accum * seq_len
     total_steps = target_tokens // global_batch_tok
     warmup_steps = 2000
-    lr = 3e-4
+    lr = 1e-5
     wd = 0.1
     log_every = 1
     ckpt_every = 1000
@@ -417,9 +417,14 @@ def main():
         cfg.max_seq_len = seq_len
         cfg.max_output_tokens = seq_len
         cfg.grad_ckpt = GRAD_CKPT
+        # Override: fewer experts = faster training, less VRAM
+        cfg.n_experts = 32
+        cfg.n_shared_experts = 2
+        cfg.n_experts_per_tok = 4
         if master:
             logger.info(f"HF base model: {BASE_MODEL}")
             logger.info(f"OpenMythos config auto-derived: dim={cfg.dim}, layers={cfg.prelude_layers}+{cfg.max_loop_iters}+{cfg.coda_layers}, heads={cfg.n_heads}/{cfg.n_kv_heads}")
+            logger.info(f"  MoE: {cfg.n_experts} experts, top-{cfg.n_experts_per_tok}, {cfg.n_shared_experts} shared")
     else:
         cfg = mythos_3b()
         cfg.vocab_size = vocab_size
@@ -429,7 +434,8 @@ def main():
     amp_dtype = torch.bfloat16 if bf16_ok else torch.float16
 
     # Create model directly on GPU in bf16 to avoid CPU OOM.
-    # A ~19B param model in fp32 would need ~76GB CPU RAM; bf16 on GPU is ~38GB.
+    # A ~6.1B param model in bf16 is ~12GB weights; with AdamW states (~24GB)
+    # and gradients (~12GB), total peak is ~48GB — comfortable on an 80GB GPU.
     gc.collect()  # free tokenizer/config CPU overhead before allocation
     if not ddp:
         _prev_dtype = torch.get_default_dtype()
@@ -486,7 +492,7 @@ def main():
     # Optimizer
     # ------------------------------------------------------------------
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=lr, weight_decay=wd, betas=(0.9, 0.95), fused=True
+        model.parameters(), lr=lr, weight_decay=wd, betas=(0.9, 0.95), fused=False
     )
 
     # ------------------------------------------------------------------

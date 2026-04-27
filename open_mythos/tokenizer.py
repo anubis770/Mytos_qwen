@@ -1,6 +1,6 @@
 from transformers import AutoTokenizer
 
-DEFAULT_MODEL_ID = "openai/gpt-oss-20b"
+DEFAULT_MODEL_ID = "unsloth/Qwen2.5-7B-Instruct"
 
 
 class MythosTokenizer:
@@ -9,7 +9,7 @@ class MythosTokenizer:
 
     Args:
         model_id (str): The HuggingFace model ID or path to use with AutoTokenizer.
-            Defaults to "openai/gpt-oss-20b".
+            Defaults to "unsloth/Qwen2.5-7B-Instruct".
 
     Attributes:
         tokenizer: An instance of HuggingFace's AutoTokenizer.
